@@ -26,7 +26,7 @@ spec:
           ports:
             - containerPort: 3306
         - name: php-mysql
-          image: matuu/php-mysql-@EDITAR_USUARIO@:latest
+          image: @EDITAR_REGISTRY@/php-mysql-@EDITAR_USUARIO@:latest
           imagePullPolicy: Always
           env:
             - name: MYSQL_ROOT_PASSWORD
@@ -50,7 +50,5 @@ spec:
   selector:
     user: @EDITAR_USUARIO@
     app: php-mysql
-#   externalIPs:
-#     - @EDITAR_EXTERNAL_IP@
 
 # vim: si et sw=2 ts=2 syntax=yaml
