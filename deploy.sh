@@ -10,8 +10,8 @@ sudo usermod -aG docker ${USER}
 (newgrp docker)&
 sudo systemctl restart docker
 
-echo "Instalando kubectl"
 # instalación de kubectl
+echo "Instalando kubectl"
 curl -LO https://storage.googleapis.com/kubernetes-release/release/$(curl -s https://storage.googleapis.com/kubernetes-release/release/stable.txt)/bin/linux/amd64/kubectl && chmod +x kubectl && sudo mv kubectl /usr/local/bin/
 
 # Instalación de minikube
@@ -29,27 +29,28 @@ sudo usermod -a -G libvirt $(whoami)
 # Update your current session for the group change to take effect
 (newgrp libvirt)&
 
+: ${registry:="localhost:5000"}
+
 # iniciar minikube
-minikube start --vm-driver=kvm --insecure-registry localhost:5000
+minikube start --vm-driver=kvm --insecure-registry ${registry}
 
 # Using minikube's Docker daemon from our localhost
 eval $(minikube docker-env)
-
-# iniciando un registry local dentro del cluster
-: ${registry:="localhost:5000"}
-kubectl apply -f local-registry.yml
 
 # establecemos secret para base de datos
 kubectl create secret generic mysql-secret --from-literal=mypass=L2e@v48GNVFT87b1
 
 # crear imágenes docker
 cd php-mysql-docker
-(set -x; test -d php-mysql || git clone https://github.com/IBM-Bluemix/php-mysql.git)
+(test -d php-mysql || git clone https://github.com/IBM-Bluemix/php-mysql.git)
 # construir imagen docker
 APP_TAGS=php-mysql-${USER}:latest
-(set -x; docker build -t ${APP_TAGS} .)
-echo "Listo: ${APP_TAGS}"
+docker build -t ${APP_TAGS} .
 cd ..
+
+# iniciando un registry local dentro del cluster
+kubectl apply -f local-registry.yml
+sleep 5  # esperamos a que levante el registry
 
 # empujar a registry local
 docker tag ${APP_TAGS} ${registry?}/${APP_TAGS}
@@ -59,7 +60,17 @@ docker push ${registry?}/${APP_TAGS}
 sed -e "s/@EDITAR_USUARIO@/${USER}/" -e "s/@EDITAR_REGISTRY@/${registry}/"  php-mysql-rc.tmpl.yaml > /tmp/php-mysql-rc-${USER}.yaml || exit 1
 kubectl create -f /tmp/php-mysql-rc-${USER}.yaml
 
-# mostrarmos la URL del recurso
+# esperamos a que esté corriendo
+STATUS=$(kubectl get pod|awk '/php-mysql-rc-matu/{ print $3 }')
+echo -n "En construcción aún..."
+while [ "$STATUS" != "Running" ]
+do
+      echo -n "."
+      sleep 1
+      STATUS=$(kubectl get pod|awk '/php-mysql-rc-matu/{ print $3 }')
+done
+echo "OK!"
+# mostramos la URL del recurso
 IP=$(minikube service php-mysql-svc-matu --url)
 echo "Para acceder a la aplicación visite: ${IP:?}/php-mysql/"
 
