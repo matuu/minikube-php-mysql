@@ -37,8 +37,8 @@ minikube start --vm-driver=kvm --insecure-registry ${registry}
 # Using minikube's Docker daemon from our localhost
 eval $(minikube docker-env)
 
-# establecemos secret para base de datos
-kubectl create secret generic mysql-secret --from-literal=mypass=L2e@v48GNVFT87b1
+# iniciando un registry local dentro del cluster
+kubectl apply -f local-registry.yml
 
 # crear imágenes docker
 cd php-mysql-docker
@@ -48,13 +48,22 @@ APP_TAGS=php-mysql-${USER}:latest
 docker build -t ${APP_TAGS} .
 cd ..
 
-# iniciando un registry local dentro del cluster
-kubectl apply -f local-registry.yml
-sleep 5  # esperamos a que levante el registry
-
+# esperamos a que termine de levantar el registry
+STATUS_REGISTRY=$(kubectl get pod --namespace kube-system|awk '/kube-registry-proxy/{ print $3}')
+echo -n "Esperando a registry local..."
+while [ "$STATUS_REGISTRY" != "Running" ]
+do
+  sleep 1
+  echo -n "."
+  STATUS_REGISTRY=$(kubectl get pod --namespace kube-system|awk '/kube-registry-proxy/{ print $3}')
+done
+echo "OK. \nSubiendo imagen a registry"
 # empujar a registry local
 docker tag ${APP_TAGS} ${registry?}/${APP_TAGS}
 docker push ${registry?}/${APP_TAGS}
+
+# establecemos secret para base de datos
+kubectl create secret generic mysql-secret --from-literal=mypass=L2e@v48GNVFT87b1
 
 # editar yaml y crear kube
 sed -e "s/@EDITAR_USUARIO@/${USER}/" -e "s/@EDITAR_REGISTRY@/${registry}/"  php-mysql-rc.tmpl.yaml > /tmp/php-mysql-rc-${USER}.yaml || exit 1
