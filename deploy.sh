@@ -33,9 +33,14 @@ sudo usermod -a -G libvirt $(whoami)
 
 # iniciar minikube
 minikube start --vm-driver=kvm --insecure-registry ${registry}
-
 # Using minikube's Docker daemon from our localhost
 eval $(minikube docker-env)
+
+# esperar a que account service esté ok
+while [ "$( kubectl get serviceaccount|awk '/default/')" == "" ]
+do
+  sleep 1
+done
 
 # iniciando un registry local dentro del cluster
 kubectl apply -f local-registry.yml
@@ -46,21 +51,21 @@ cd php-mysql-docker
 # construir imagen docker
 APP_TAGS=php-mysql-${USER}:latest
 docker build -t ${APP_TAGS} .
+docker tag ${APP_TAGS} ${registry}/${APP_TAGS}
 cd ..
 
 # esperamos a que termine de levantar el registry
 STATUS_REGISTRY=$(kubectl get pod --namespace kube-system|awk '/kube-registry-proxy/{ print $3}')
-echo -n "Esperando a registry local..."
+echo "Estado (kube-registry-proxy): ${STATUS_REGISTRY}"
 while [ "$STATUS_REGISTRY" != "Running" ]
 do
   sleep 1
-  echo -n "."
   STATUS_REGISTRY=$(kubectl get pod --namespace kube-system|awk '/kube-registry-proxy/{ print $3}')
+  echo -en "\e[1A"; echo -e "\e[0KEstado (kube-registry-proxy): ${STATUS_REGISTRY}"
 done
-echo "OK. \nSubiendo imagen a registry"
+echo "OK."
 # empujar a registry local
-docker tag ${APP_TAGS} ${registry?}/${APP_TAGS}
-docker push ${registry?}/${APP_TAGS}
+docker push ${registry}/${APP_TAGS}
 
 # establecemos secret para base de datos
 kubectl create secret generic mysql-secret --from-literal=mypass=L2e@v48GNVFT87b1
@@ -70,17 +75,22 @@ sed -e "s/@EDITAR_USUARIO@/${USER}/" -e "s/@EDITAR_REGISTRY@/${registry}/"  php-
 kubectl create -f /tmp/php-mysql-rc-${USER}.yaml
 
 # esperamos a que esté corriendo
-STATUS=$(kubectl get pod|awk '/php-mysql-rc-matu/{ print $3 }')
-echo -n "En construcción aún..."
+STATUS=$(kubectl get pod|awk '/php-mysql-rc/{ print $3 }')
+echo "Estado (php-mysql-rc-${USER}): ${STATUS}"
 while [ "$STATUS" != "Running" ]
 do
-      echo -n "."
+      if [ "$STATUS" == "ImagePullBackOff" ]; then
+          # intento subir nuevamente la imagen al registry local
+          # aleatoriamente, al hacer push obtengo un error EOF
+          docker push ${registry}/${APP_TAGS}
+      fi
       sleep 1
-      STATUS=$(kubectl get pod|awk '/php-mysql-rc-matu/{ print $3 }')
+      STATUS=$(kubectl get pod|awk '/php-mysql-rc/{ print $3 }')
+      echo -en "\e[1A"; echo -e "\e[0KEstado (php-mysql-rc-${USER}): ${STATUS}"
 done
 echo "OK!"
 # mostramos la URL del recurso
-IP=$(minikube service php-mysql-svc-matu --url)
+IP=$(minikube service php-mysql-svc-${USER} --url)
 echo "Para acceder a la aplicación visite: ${IP:?}/php-mysql/"
 
 echo "Luego, para eliminarla haga:"
